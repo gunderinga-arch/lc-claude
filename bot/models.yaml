@@ -1,0 +1,173 @@
+# Каталог моделей шлюза. Меняется без правки кода.
+# Значения выбраны по бенчмаркам из buytokens_api_spravochnik.md.
+#
+# max_tokens должен покрывать скрытые рассуждения + ответ: reasoning_effort шлюз игнорирует,
+# и при нехватке лимита приходит ПУСТОЙ content, а не обрезанный текст.
+# 15.10.2026: шлюз сам обрывает один ответ около 50k токенов (Opus 5: 50 339 при запрошенных 128 000),
+# поэтому max_tokens = 50000 — это весь потолок шлюза; длиннее ответ собирается из частей (продолжения бота).
+#
+# context_tokens — окно модели в оценке бота (bot.domain.count_tokens): промпт + max_tokens. Замер 15.10.2026,
+# «иголки» в начале, середине и конце нашлись все: Opus 5 — 950 625 токенов, GPT-6 Sol — 945 338,
+# Fable 5.1 — 939 097 (а на ~1,1 млн шлюз ответил 400). Продавец заявляет 524 288 — устарело.
+# tokenizer — чей счёт токенов: claude (Opus/Fable: ~2 символа русского на токен) или gpt (Sol: ~4,4).
+
+max_tokens_cap: 128000   # потолок при удвоении max_tokens после пустого ответа
+max_attempts: 3          # попыток на одну модель до перехода на фолбэк
+# timeout_s 590: без потока шлюз обрывает запрос на 600-й секунде (проверено 23.09.2026). Ответы идут потоком
+# (SSE): обрыв по времени оставляет уже написанное, и бот продолжает с места обрыва.
+
+# 13.10.2026: в выборе лучшие по бенчмарку (HLE + ARC, 11–13.10) и по одному ТЗ на сайт —
+# Fable 5.1, GPT-6 Sol, Opus 5. Выключены, но лежат здесь (вернуть — enabled: true): GPT-5.6 Sol и Opus 4.8 —
+# похожи на дубли GPT-6 Sol и Opus 5 (проверка в /root/bench/twins.py), Fable 5 — сайт не запустился, Luna — фактические ошибки.
+modes:
+  fast: gpt-6-sol           # служебные вызовы (заголовки, переписывание) и режим «быстрый»
+  normal: claude-opus-5
+  deep: claude-fable-5.1
+
+models:
+  claude-fable-5.1:
+    title: Fable 5.1 (самая сильная, медленная)
+    max_tokens: 50000
+    context_tokens: 850000  # шлюз считает Fable на больших текстах ~на 17% больше, чем Opus: 991 808 его токенов
+    timeout_s: 590
+    fallback: claude-opus-5
+    enabled: true
+    slow: true
+  gpt-6-sol:
+    title: GPT-6 Sol
+    max_tokens: 50000  # 14.10.2026: 16k cut a 15-slide canvas deck (JSON ~38k chars) in the middle
+    context_tokens: 1000000
+    tokenizer: gpt
+    timeout_s: 590
+    fallback: claude-opus-5
+    enabled: true
+    slow: false
+  claude-opus-5:
+    title: Opus 5
+    max_tokens: 50000  # 14.10.2026: 16k cut a 15-slide canvas deck (JSON ~38k chars) in the middle
+    context_tokens: 1000000
+    timeout_s: 590
+    fallback: gpt-6-sol
+    enabled: true
+    slow: false
+  # Не модель шлюза, а конвейер бота: pipeline-модель сначала пишет план ответа и выбирает скиллы,
+  # потом по этому плану отвечает отдельная модель. max_tokens/timeout_s не используются.
+  plan-opus:
+    title: GPT-6 Sol с планом (многоэтапные задачи)
+    pipeline: gpt-6-sol
+    answer: gpt-6-sol
+    max_tokens: 16000
+    timeout_s: 590
+    enabled: true
+    slow: true
+    probe: false
+  claude-opus-4.8:
+    title: Opus 4.8
+    max_tokens: 16000
+    timeout_s: 590
+    fallback: claude-opus-5
+    enabled: false
+    slow: false
+    note: выключена 13.10.2026 — Opus 5 не хуже (ARC 34 против 28 из 167), похоже на дубль
+  gpt-5.6-sol:
+    title: Sol
+    max_tokens: 16000
+    timeout_s: 590
+    fallback: gpt-6-sol
+    enabled: false
+    slow: false
+    note: выключена 13.10.2026 — дубль GPT-6 Sol (те же скорость и длина ответов, точность в пределах шума)
+  gpt-5.6-luna:
+    title: Luna (быстрая)
+    max_tokens: 16000
+    timeout_s: 590
+    fallback: gpt-6-sol
+    enabled: false
+    slow: false
+    note: выключена 13.10.2026 — не в пятёрке лучших, фактические ошибки на ТЗ сайта
+  claude-fable-5:
+    title: Fable 5 (глубокое мышление)
+    max_tokens: 32000
+    timeout_s: 590
+    fallback: claude-opus-4.8
+    enabled: false
+    slow: true
+    note: выключена 13.10.2026 — Fable 5.1 сильнее, сайт по ТЗ сломан собственной ошибкой
+  gpt-6-astra:
+    title: Astra
+    max_tokens: 16000
+    timeout_s: 590
+    fallback: gpt-6-sol
+    enabled: false
+    slow: false
+    note: выключена 09.10.2026 — на HLE/ARC (30.09) заметно слабее Sol, плюс обрывы ответов
+  claude-opus-4.7:
+    title: Opus 4.7
+    max_tokens: 16000
+    timeout_s: 590
+    fallback: claude-opus-4.8
+    enabled: false
+    slow: false
+    note: есть 4.8
+
+# Пул резервного шлюза (OmniRoute Free Kit), на случай аварии основного. Сильнейшая модель первая:
+# именно в этом порядке /model показывает их, пока включён резервный переключатель. free-coded — это
+# комбо самого OmniRoute (перебирает весь пул сверху вниз сам), поэтому у неё нет фолбэка; у остальных
+# фолбэк на free-coded — тот же перебор подхватит, если конкретная модель пула недоступна.
+# smart-reserve — комбо OmniRoute: сначала Claude и Gemini через Google-аккаунт владельца (Antigravity), потом
+# платные GPT-6 Luna и Claude Haiku 5.5 через RouterAI (узел OmniRoute с префиксом rai/, ключ ROUTERAI_API_KEY,
+# с 13.10.2026; ~0,3 ₽ за трудный вопрос), потом пул NVIDIA. У Antigravity недельная квота (~1700 запросов на
+# Claude, отдельно на Gemini), поэтому probe: false — пинги админ-бота раз в 15 минут съели бы её.
+# free-coded начинается с тех же двух моделей RouterAI: NVIDIA часто висит до таймаута OmniRoute (240 с), и до
+# моделей в конце цепочки очередь не доходит. Дефолт резерва задаёт RESERVE_MODEL в .env.
+reserve_models:
+  smart-reserve:
+    title: Авто (Claude/Gemini → GPT-6 Luna → бесплатные)
+    max_tokens: 16000
+    timeout_s: 300
+    probe: false
+  free-coded:
+    title: Авто (GPT-6 Luna → бесплатные)
+    max_tokens: 16000
+    timeout_s: 300
+  nvidia/z-ai/glm-5.3:
+    title: GLM 5.3
+    max_tokens: 16000
+    timeout_s: 300
+    fallback: free-coded
+  nvidia/moonshotai/kimi-k3:
+    title: Kimi K3
+    max_tokens: 16000
+    timeout_s: 300
+    fallback: free-coded
+  nvidia/deepseek-ai/deepseek-v4.1-flash:
+    title: DeepSeek V4.1 Flash
+    max_tokens: 16000
+    timeout_s: 300
+    fallback: free-coded
+  nvidia/nvidia/nemotron-3-ultra-550b-a55b:
+    title: Nemotron 3 Ultra
+    max_tokens: 16000
+    timeout_s: 300
+    fallback: free-coded
+  nvidia/nvidia/nemotron-3-super-120b-a12b:
+    title: Nemotron 3 Super
+    max_tokens: 16000
+    timeout_s: 300
+    fallback: free-coded
+  nvidia/z-ai/glm-5.3-flash:
+    title: GLM 5.3 Flash
+    max_tokens: 16000
+    timeout_s: 300
+    fallback: free-coded
+  # Служебная (service: true): называет новые чаты-темы (~1,5 с, ~0,002 ₽) и описывает словами картинки, которые
+  # шлюз не донёс до Opus 5 / Sol (описание ~1 мин), зашивает швы длинных ответов из частей (видит только ~700
+  # символов по обе стороны шва, и только когда повтор на стыке не нашёлся сам), чинит строки битого JSON
+  # презентаций — в выборе модели её нет. Платная, через RouterAI. Не пингуется.
+  rai/anthropic/claude-haiku-5.5:
+    title: Claude Haiku 5.5 (служебная)
+    max_tokens: 3000
+    context_tokens: 200000
+    timeout_s: 150
+    probe: false
+    service: true
